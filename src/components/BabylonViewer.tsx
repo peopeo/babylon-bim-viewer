@@ -1128,6 +1128,35 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           >
             L2 + Instancing (2.4MB)
           </button>
+          <button
+            onClick={() =>
+              loadModelFromPath('/models/compressed_level2_instanced_selectable.glb', 'Level 2 Inst+Select 1.84MB')
+            }
+            style={{
+              padding: '8px 16px',
+              background: currentModelName === 'Level 2 Inst+Select 1.84MB' ? '#4CAF50' : '#555',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (currentModelName !== 'Level 2 Inst+Select 1.84MB') {
+                e.currentTarget.style.background = '#666';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentModelName !== 'Level 2 Inst+Select 1.84MB') {
+                e.currentTarget.style.background = '#555';
+              }
+            }}
+            title="GPU Instancing + Individual Element Selection (no mesh joining)"
+          >
+            L2 Inst+Select (1.84MB)
+          </button>
         </div>
       </div>
 
