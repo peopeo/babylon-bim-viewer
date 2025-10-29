@@ -20,6 +20,9 @@ import {
   TextureOptimization,
   ShadowsOptimization,
   PostProcessesOptimization,
+  HighlightLayer,
+  Color3,
+  StandardMaterial,
 } from '@babylonjs/core';
 import { GridMaterial } from '@babylonjs/materials';
 import '@babylonjs/loaders/glTF';
@@ -69,6 +72,8 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   const [loadTime, setLoadTime] = useState<number | undefined>(undefined);
   const [currentModelName, setCurrentModelName] = useState<string>('');
   const [optimizerEnabled, setOptimizerEnabled] = useState(true);
+  const [selectedMesh, setSelectedMesh] = useState<AbstractMesh | null>(null);
+  const highlightLayerRef = useRef<HighlightLayer | null>(null);
 
   // Initialize Babylon.js scene
   useEffect(() => {
@@ -166,6 +171,12 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
     const axes = new AxesViewer(scene, VIEWER_CONFIG.axes.size);
     axesViewerRef.current = axes;
 
+    // Create highlight layer for selection
+    const highlightLayer = new HighlightLayer('highlight', scene);
+    highlightLayer.outerGlow = true;
+    highlightLayer.innerGlow = false;
+    highlightLayerRef.current = highlightLayer;
+
     // Create gizmo manager
     const utilLayer = new UtilityLayerRenderer(scene);
     const gizmoManager = new GizmoManager(scene, 2, utilLayer);
@@ -175,6 +186,27 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
     gizmoManager.scaleGizmoEnabled = false;
     gizmoManager.boundingBoxGizmoEnabled = false;
     gizmoManagerRef.current = gizmoManager;
+
+    // Setup click handler for mesh selection
+    scene.onPointerDown = (evt, pickResult) => {
+      // Only handle left click
+      if (evt.button !== 0) return;
+
+      if (pickResult.hit && pickResult.pickedMesh) {
+        const mesh = pickResult.pickedMesh;
+
+        // Don't select ground or axes
+        if (mesh === groundRef.current || mesh.name.includes('axes')) {
+          return;
+        }
+
+        console.log('Selected mesh:', mesh.name);
+        setSelectedMesh(mesh);
+      } else {
+        // Clicked on empty space - deselect
+        setSelectedMesh(null);
+      }
+    };
 
     // Enable inspector if requested
     if (enableInspector) {
@@ -208,6 +240,32 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       engine.dispose();
     };
   }, [enableInspector]);
+
+  // Handle mesh selection highlighting
+  useEffect(() => {
+    if (!highlightLayerRef.current) return;
+
+    // Clear all highlights first
+    highlightLayerRef.current.removeAllMeshes();
+
+    // Add highlight to selected mesh
+    if (selectedMesh && selectedMesh instanceof Mesh) {
+      highlightLayerRef.current.addMesh(selectedMesh, Color3.Green());
+      console.log('Highlighted mesh:', selectedMesh.name);
+    }
+  }, [selectedMesh]);
+
+  // Handle ESC key to deselect
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && selectedMesh) {
+        setSelectedMesh(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedMesh]);
 
   // Fit to view function
   const fitToView = useCallback(
@@ -1141,6 +1199,79 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           instrumentation={instrumentationRef.current}
           loadTime={loadTime}
         />
+      )}
+
+      {/* Selection Info Panel */}
+      {selectedMesh && (
+        <div style={{
+          position: 'fixed',
+          top: '10px',
+          left: '10px',
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          padding: '15px',
+          borderRadius: '6px',
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          color: '#fff',
+          zIndex: 1000,
+          minWidth: '250px',
+          backdropFilter: 'blur(4px)',
+          border: '2px solid #4ade80',
+        }}>
+          <div style={{
+            fontWeight: 'bold',
+            marginBottom: '10px',
+            fontSize: '13px',
+            borderBottom: '1px solid rgba(74, 222, 128, 0.3)',
+            paddingBottom: '6px',
+            color: '#4ade80',
+          }}>
+            Selected Element
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Name:</span>
+              <span style={{ fontWeight: 'bold' }}>{selectedMesh.name}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>ID:</span>
+              <span style={{ fontWeight: 'bold' }}>{selectedMesh.id || 'N/A'}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ opacity: 0.7 }}>Vertices:</span>
+              <span style={{ fontWeight: 'bold' }}>{selectedMesh.getTotalVertices().toLocaleString()}</span>
+            </div>
+            {selectedMesh instanceof Mesh && selectedMesh.material && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ opacity: 0.7 }}>Material:</span>
+                <span style={{ fontWeight: 'bold' }}>{selectedMesh.material.name || 'Unnamed'}</span>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setSelectedMesh(null)}
+            style={{
+              marginTop: '12px',
+              padding: '6px 12px',
+              background: '#ef4444',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              width: '100%',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#dc2626';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#ef4444';
+            }}
+          >
+            Deselect (ESC)
+          </button>
+        </div>
       )}
     </div>
   );
