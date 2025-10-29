@@ -36,6 +36,7 @@ import {
   isValidFileExtension,
 } from './BabylonViewer.utils';
 import { PerformanceMonitor } from './PerformanceMonitor';
+import { MaterialLibrary } from '../materials/MaterialLibrary';
 
 interface BabylonViewerProps {
   width?: string;
@@ -86,6 +87,10 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
     // Create scene
     const scene = new Scene(engine);
     scene.clearColor = VIEWER_CONFIG.scene.clearColor;
+
+    // Increase environment intensity for PBR materials
+    scene.environmentIntensity = 1.5; // Brighter reflections and ambient
+
     sceneRef.current = scene;
 
     // Enable scene instrumentation for performance monitoring
@@ -595,6 +600,12 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         setLoadedModel(result.meshes);
         console.log('Model state updated');
 
+        // === APPLY REALISTIC MATERIALS ===
+        console.log('=== APPLYING REALISTIC MATERIALS ===');
+        const matLib = new MaterialLibrary(sceneRef.current);
+        const materialStats = matLib.applyToMeshes(result.meshes as Mesh[], 1.0);
+        console.log(`Material application complete: ${materialStats.replaced}/${materialStats.total} materials replaced`);
+
         // Enable shadows for loaded meshes
         let shadowCount = 0;
         result.meshes.forEach((mesh) => {
@@ -728,6 +739,12 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         setLoadedModel(result.meshes);
         setCurrentModelName(modelName);
         console.log('Model state updated');
+
+        // === APPLY REALISTIC MATERIALS ===
+        console.log('=== APPLYING REALISTIC MATERIALS ===');
+        const matLib = new MaterialLibrary(sceneRef.current);
+        const materialStats = matLib.applyToMeshes(result.meshes as Mesh[], 1.0);
+        console.log(`Material application complete: ${materialStats.replaced}/${materialStats.total} materials replaced`);
 
         // === INSTANCING DIAGNOSTICS ===
         console.log('=== INSTANCING DIAGNOSTICS ===');
@@ -1181,7 +1198,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
             cursor: 'pointer',
             boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
             transition: 'all 0.2s ease',
-            zIndex: 100,
+            zIndex: 1001,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 1)';

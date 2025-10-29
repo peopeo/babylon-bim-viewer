@@ -12,7 +12,7 @@ export const VIEWER_CONFIG = {
 
   // Scene settings
   scene: {
-    clearColor: new Color4(0.2, 0.2, 0.25, 1.0),
+    clearColor: new Color4(0.5, 0.5, 0.55, 1.0), // Brighter background
   },
 
   // Camera settings
@@ -36,13 +36,13 @@ export const VIEWER_CONFIG = {
     hemispheric: {
       name: 'hemiLight',
       direction: new Vector3(0, 1, 0),
-      intensity: 0.6,
+      intensity: 1.2, // Increased for brighter ambient lighting
     },
     directional: {
       name: 'dirLight',
       direction: new Vector3(-1, -2, -1),
       position: new Vector3(20, 40, 20),
-      intensity: 0.8,
+      intensity: 1.5, // Increased for stronger directional light
     },
   },
 
