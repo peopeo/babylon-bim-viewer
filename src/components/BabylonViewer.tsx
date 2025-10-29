@@ -226,8 +226,16 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       const { min, max } = calculateBoundingBox(meshesToFrame);
       const { center, maxDim } = getBoundingBoxInfo(min, max);
 
+      console.log(`Bounding box calculated: center=(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}), maxDim=${maxDim.toFixed(2)}`);
+
+      // Set target and radius
       camera.setTarget(center);
-      camera.radius = maxDim * VIEWER_CONFIG.framing.radiusMultiplier;
+      const newRadius = maxDim * VIEWER_CONFIG.framing.radiusMultiplier;
+      camera.radius = newRadius;
+
+      // Set camera angles to a good default view (45° from top, looking from front-right)
+      camera.alpha = -Math.PI / 4;  // 45° around Y axis
+      camera.beta = Math.PI / 3;     // 60° from top
 
       // Dynamically adjust camera sensitivity based on radius
       // Larger radius = need MUCH lower wheelPrecision for faster zoom
@@ -240,7 +248,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       // Formula: inversely proportional to radius, clamped between 10 and 1000
       camera.panningSensibility = Math.max(10, Math.min(1000, 5000 / camera.radius));
 
-      console.log(`Camera adjusted: radius=${camera.radius.toFixed(2)}, wheelPrecision=${camera.wheelPrecision.toFixed(2)}, panningSensibility=${camera.panningSensibility.toFixed(2)}`);
+      console.log(`Camera adjusted: radius=${camera.radius.toFixed(2)}, alpha=${camera.alpha.toFixed(2)}, beta=${camera.beta.toFixed(2)}, wheelPrecision=${camera.wheelPrecision.toFixed(2)}, panningSensibility=${camera.panningSensibility.toFixed(2)}`);
     },
     [loadedModel]
   );
@@ -610,11 +618,18 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
 
         console.log('Starting ImportMeshAsync...');
 
+        // Split path into root and filename for proper loading
+        const pathParts = modelPath.split('/');
+        const filename = pathParts.pop() || '';
+        const rootPath = pathParts.join('/') + '/';
+
+        console.log(`Loading from: root="${rootPath}", file="${filename}"`);
+
         // Load the GLB file from path
         const result = await SceneLoader.ImportMeshAsync(
           '',
-          modelPath,
-          '',
+          rootPath,
+          filename,
           sceneRef.current,
           (evt) => {
             progressEventCount++;
