@@ -715,6 +715,27 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         setCurrentModelName(modelName);
         console.log('Model state updated');
 
+        // Center model at origin (fix for IFC files with real-world coordinates)
+        const { min, max } = calculateBoundingBox(result.meshes);
+        const { center } = getBoundingBoxInfo(min, max);
+
+        // Check if model is far from origin (coordinates > 1000 units away)
+        const distanceFromOrigin = Math.sqrt(center.x * center.x + center.y * center.y + center.z * center.z);
+        if (distanceFromOrigin > 1000) {
+          console.log(`Model far from origin (${distanceFromOrigin.toFixed(2)} units). Centering at origin...`);
+          console.log(`Original center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+
+          // Translate all meshes to origin
+          const offset = center.negate();
+          result.meshes.forEach((mesh) => {
+            if (mesh instanceof Mesh || mesh.getClassName() === 'TransformNode') {
+              mesh.position.addInPlace(offset);
+            }
+          });
+
+          console.log(`Model centered at origin with offset: (${offset.x.toFixed(2)}, ${offset.y.toFixed(2)}, ${offset.z.toFixed(2)})`);
+        }
+
         // Enable shadows for loaded meshes
         let shadowCount = 0;
         result.meshes.forEach((mesh) => {
