@@ -22,7 +22,6 @@ import {
   PostProcessesOptimization,
   HighlightLayer,
   Color3,
-  StandardMaterial,
 } from '@babylonjs/core';
 import { GridMaterial } from '@babylonjs/materials';
 import '@babylonjs/loaders/glTF';
@@ -213,6 +212,9 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       Inspector.Show(scene, {});
     }
 
+    // Store scene ref for inspector toggle
+    sceneRef.current = scene;
+
     // Render loop
     engine.runRenderLoop(() => {
       scene.render();
@@ -227,14 +229,22 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
     // Cleanup
     return () => {
       window.removeEventListener('resize', handleResize);
+
+      // Cleanup inspector FIRST before disposing scene
+      if (Inspector.IsVisible) {
+        try {
+          Inspector.Hide();
+        } catch (e) {
+          // Ignore DOM errors during cleanup
+          console.warn('Inspector cleanup warning (safe to ignore):', e);
+        }
+      }
+
       if (axesViewerRef.current) {
         axesViewerRef.current.dispose();
       }
       if (gizmoManagerRef.current) {
         gizmoManagerRef.current.dispose();
-      }
-      if (Inspector.IsVisible) {
-        Inspector.Hide();
       }
       scene.dispose();
       engine.dispose();
@@ -715,25 +725,85 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         setCurrentModelName(modelName);
         console.log('Model state updated');
 
+        // === INSTANCING DIAGNOSTICS ===
+        console.log('=== INSTANCING DIAGNOSTICS ===');
+        let instancedMeshCount = 0;
+        let totalInstanceCount = 0;
+        console.log('Checking first 10 meshes for instancing:');
+        result.meshes.slice(0, 10).forEach((mesh, i) => {
+          if (mesh instanceof Mesh) {
+            const hasInstances = mesh.instances && mesh.instances.length > 0;
+            if (hasInstances) {
+              instancedMeshCount++;
+              totalInstanceCount += mesh.instances.length;
+            }
+            console.log(`  Mesh ${i}: ${mesh.name}`);
+            console.log(`    Instances: ${mesh.instances?.length || 0}`);
+            console.log(`    Material: ${mesh.material?.name || 'none'}`);
+            console.log(`    Vertices: ${mesh.getTotalVertices()}`);
+            console.log(`    Visible: ${mesh.isVisible}`);
+          }
+        });
+        console.log(`Total meshes with instances: ${instancedMeshCount}`);
+        console.log(`Total instance count (first 10): ${totalInstanceCount}`);
+        console.log('=== END DIAGNOSTICS ===');
+
         // Center model at origin (fix for IFC files with real-world coordinates)
         const { min, max } = calculateBoundingBox(result.meshes);
-        const { center } = getBoundingBoxInfo(min, max);
+        const { center, maxDim } = getBoundingBoxInfo(min, max);
 
         // Check if model is far from origin (coordinates > 1000 units away)
+        // BUT check relative to model size - if distance > 100x model size, it's real-world coords
         const distanceFromOrigin = Math.sqrt(center.x * center.x + center.y * center.y + center.z * center.z);
-        if (distanceFromOrigin > 1000) {
+        const relativeDistance = maxDim > 0 ? distanceFromOrigin / maxDim : distanceFromOrigin;
+
+        console.log(`Distance check: absolute=${distanceFromOrigin.toFixed(2)}, relative=${relativeDistance.toFixed(2)}x model size`);
+
+        if (distanceFromOrigin > 1000 && relativeDistance > 100) {
           console.log(`Model far from origin (${distanceFromOrigin.toFixed(2)} units). Centering at origin...`);
           console.log(`Original center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
 
-          // Translate all meshes to origin
+          // Find all TRUE root nodes (nodes whose parent is not in the loaded meshes list)
           const offset = center.negate();
+          const meshSet = new Set(result.meshes);
+          const trueRootNodes = result.meshes.filter(mesh => {
+            // No parent = root
+            if (!mesh.parent) return true;
+            // Parent not in our loaded meshes = root (parent is scene or external)
+            return !meshSet.has(mesh.parent as any);
+          });
+
+          console.log(`Found ${trueRootNodes.length} true root nodes to translate`);
+          trueRootNodes.forEach(node => {
+            console.log(`  Root: ${node.name} at (${node.position.x.toFixed(2)}, ${node.position.y.toFixed(2)}, ${node.position.z.toFixed(2)})`);
+          });
+
+          // Move only true root nodes (their children will follow)
+          trueRootNodes.forEach((mesh) => {
+            mesh.position.addInPlace(offset);
+          });
+
+          // Force world matrix and bounding info update for ALL meshes
+          console.log('Computing world matrices and bounding info for all meshes...');
           result.meshes.forEach((mesh) => {
-            if (mesh instanceof Mesh || mesh.getClassName() === 'TransformNode') {
-              mesh.position.addInPlace(offset);
+            if (mesh instanceof Mesh) {
+              // Force world matrix update
+              mesh.computeWorldMatrix(true);
+              // Force bounding info to recompute with new world matrix
+              const boundingInfo = mesh.getBoundingInfo();
+              boundingInfo.update(mesh._worldMatrix);
             }
           });
 
           console.log(`Model centered at origin with offset: (${offset.x.toFixed(2)}, ${offset.y.toFixed(2)}, ${offset.z.toFixed(2)})`);
+
+          // Debug: Log first few mesh positions and vertex counts
+          console.log('Debug: First 5 meshes after centering:');
+          result.meshes.slice(0, 5).forEach((mesh, i) => {
+            if (mesh instanceof Mesh) {
+              console.log(`  Mesh ${i}: ${mesh.name}, pos=(${mesh.position.x.toFixed(2)}, ${mesh.position.y.toFixed(2)}, ${mesh.position.z.toFixed(2)}), vertices=${mesh.getTotalVertices()}, visible=${mesh.isVisible}, enabled=${mesh.isEnabled()}`);
+            }
+          });
         }
 
         // Enable shadows for loaded meshes
@@ -1180,11 +1250,11 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           </button>
           <button
             onClick={() =>
-              loadModelFromPath('/models/bilton_final_instanced.glb', 'Bilton Full 23MB')
+              loadModelFromPath('/models/bilton_final_instanced.glb', 'Bilton Instanced 23MB')
             }
             style={{
               padding: '8px 16px',
-              background: currentModelName === 'Bilton Full 23MB' ? '#4CAF50' : '#555',
+              background: currentModelName === 'Bilton Instanced 23MB' ? '#4CAF50' : '#555',
               color: '#fff',
               border: 'none',
               borderRadius: '4px',
@@ -1194,18 +1264,178 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
               transition: 'all 0.2s',
             }}
             onMouseEnter={(e) => {
-              if (currentModelName !== 'Bilton Full 23MB') {
+              if (currentModelName !== 'Bilton Instanced 23MB') {
                 e.currentTarget.style.background = '#666';
               }
             }}
             onMouseLeave={(e) => {
-              if (currentModelName !== 'Bilton Full 23MB') {
+              if (currentModelName !== 'Bilton Instanced 23MB') {
                 e.currentTarget.style.background = '#555';
               }
             }}
-            title="Real BIM model (3.3GB IFC → 23MB): 2597 instance batches, 29081 instances"
+            title="Original instanced model with auto-centering: 2597 batches, 29081 instances"
           >
-            Bilton Full (23MB)
+            Bilton Inst (23MB)
+          </button>
+          <button
+            onClick={() =>
+              loadModelFromPath('/models/bilton_final_centered.glb', 'Bilton Centered 56MB')
+            }
+            style={{
+              padding: '8px 16px',
+              background: currentModelName === 'Bilton Centered 56MB' ? '#4CAF50' : '#555',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (currentModelName !== 'Bilton Centered 56MB') {
+                e.currentTarget.style.background = '#666';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentModelName !== 'Bilton Centered 56MB') {
+                e.currentTarget.style.background = '#555';
+              }
+            }}
+            title="Centered at origin (instancing may be lost): 56 MB"
+          >
+            Bilton Centered (56MB)
+          </button>
+        </div>
+
+        {/* Bilton Compression Test Row */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            marginTop: '8px',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ fontSize: '11px', color: '#aaa', alignSelf: 'center', marginRight: '8px' }}>
+            Bilton Tests:
+          </div>
+          <button
+            onClick={() =>
+              loadModelFromPath('/models/bilton_baseline.glb', 'Bilton Baseline 630MB')
+            }
+            style={{
+              padding: '8px 16px',
+              background: currentModelName === 'Bilton Baseline 630MB' ? '#4CAF50' : '#555',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (currentModelName !== 'Bilton Baseline 630MB') {
+                e.currentTarget.style.background = '#666';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentModelName !== 'Bilton Baseline 630MB') {
+                e.currentTarget.style.background = '#555';
+              }
+            }}
+            title="Uncompressed GLB from IFC - no gltfpack"
+          >
+            Baseline (630MB)
+          </button>
+          <button
+            onClick={() =>
+              loadModelFromPath('/models/bilton_level1.glb', 'Bilton L1')
+            }
+            style={{
+              padding: '8px 16px',
+              background: currentModelName === 'Bilton L1' ? '#4CAF50' : '#555',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (currentModelName !== 'Bilton L1') {
+                e.currentTarget.style.background = '#666';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentModelName !== 'Bilton L1') {
+                e.currentTarget.style.background = '#555';
+              }
+            }}
+            title="Light compression: gltfpack -c"
+          >
+            L1 Light
+          </button>
+          <button
+            onClick={() =>
+              loadModelFromPath('/models/bilton_level2.glb', 'Bilton L2')
+            }
+            style={{
+              padding: '8px 16px',
+              background: currentModelName === 'Bilton L2' ? '#4CAF50' : '#555',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (currentModelName !== 'Bilton L2') {
+                e.currentTarget.style.background = '#666';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentModelName !== 'Bilton L2') {
+                e.currentTarget.style.background = '#555';
+              }
+            }}
+            title="Medium compression: gltfpack -cc (34 MB)"
+          >
+            L2 Medium
+          </button>
+          <button
+            onClick={() =>
+              loadModelFromPath('/models/bilton_level3.glb', 'Bilton L3')
+            }
+            style={{
+              padding: '8px 16px',
+              background: currentModelName === 'Bilton L3' ? '#4CAF50' : '#555',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (currentModelName !== 'Bilton L3') {
+                e.currentTarget.style.background = '#666';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentModelName !== 'Bilton L3') {
+                e.currentTarget.style.background = '#555';
+              }
+            }}
+            title="Heavy compression: gltfpack -cc -kn"
+          >
+            L3 Heavy
           </button>
         </div>
       </div>
@@ -1267,6 +1497,32 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           }}
         >
           {VIEWER_CONFIG.text.fitToViewButton}
+        </button>
+      )}
+
+      {/* Inspector Toggle Button */}
+      {loadedModel && (
+        <button
+          onClick={() => {
+            if (Inspector.IsVisible) {
+              Inspector.Hide();
+            } else {
+              Inspector.Show(sceneRef.current!, {});
+            }
+          }}
+          style={{
+            ...styles.button(),
+            left: '130px',
+          }}
+          onMouseEnter={(e) => {
+            Object.assign(e.currentTarget.style, styles.buttonHover);
+          }}
+          onMouseLeave={(e) => {
+            Object.assign(e.currentTarget.style, styles.buttonNormal);
+          }}
+          title="Toggle Babylon.js Inspector"
+        >
+          Inspector
         </button>
       )}
 
