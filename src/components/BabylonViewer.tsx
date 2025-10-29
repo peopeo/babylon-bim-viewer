@@ -1157,6 +1157,35 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           >
             L2 Inst+Select (1.84MB)
           </button>
+          <button
+            onClick={() =>
+              loadModelFromPath('/models/bilton_final_instanced.glb', 'Bilton Full 23MB')
+            }
+            style={{
+              padding: '8px 16px',
+              background: currentModelName === 'Bilton Full 23MB' ? '#4CAF50' : '#555',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (currentModelName !== 'Bilton Full 23MB') {
+                e.currentTarget.style.background = '#666';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentModelName !== 'Bilton Full 23MB') {
+                e.currentTarget.style.background = '#555';
+              }
+            }}
+            title="Real BIM model (3.3GB IFC → 23MB): 2597 instance batches, 29081 instances"
+          >
+            Bilton Full (23MB)
+          </button>
         </div>
       </div>
 
