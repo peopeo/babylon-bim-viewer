@@ -72,6 +72,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   const [currentModelName, setCurrentModelName] = useState<string>('');
   const [optimizerEnabled, setOptimizerEnabled] = useState(true);
   const [selectedMesh, setSelectedMesh] = useState<AbstractMesh | null>(null);
+  const [showUI, setShowUI] = useState(true);
   const highlightLayerRef = useRef<HighlightLayer | null>(null);
 
   // Initialize Babylon.js scene
@@ -753,34 +754,42 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         const { center, maxDim } = getBoundingBoxInfo(min, max);
 
         // Check if model is far from origin (coordinates > 1000 units away)
-        // BUT check relative to model size - if distance > 100x model size, it's real-world coords
         const distanceFromOrigin = Math.sqrt(center.x * center.x + center.y * center.y + center.z * center.z);
         const relativeDistance = maxDim > 0 ? distanceFromOrigin / maxDim : distanceFromOrigin;
 
-        console.log(`Distance check: absolute=${distanceFromOrigin.toFixed(2)}, relative=${relativeDistance.toFixed(2)}x model size`);
+        console.log('=== CENTERING DIAGNOSTIC ===');
+        console.log(`Bounding box: min=(${min.x.toFixed(2)}, ${min.y.toFixed(2)}, ${min.z.toFixed(2)})`);
+        console.log(`Bounding box: max=(${max.x.toFixed(2)}, ${max.y.toFixed(2)}, ${max.z.toFixed(2)})`);
+        console.log(`Center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+        console.log(`Distance from origin: ${distanceFromOrigin.toFixed(2)} units`);
+        console.log(`Relative distance: ${relativeDistance.toFixed(2)}x model size`);
+        console.log(`Max dimension: ${maxDim.toFixed(2)} units`);
 
-        if (distanceFromOrigin > 1000 && relativeDistance > 100) {
+        // Center if far from origin (helps with WebGL precision issues)
+        if (distanceFromOrigin > 1000) {
           console.log(`Model far from origin (${distanceFromOrigin.toFixed(2)} units). Centering at origin...`);
           console.log(`Original center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
 
-          // Find all TRUE root nodes (nodes whose parent is not in the loaded meshes list)
+          // FIXED: Move ALL meshes by the offset, not just "root" nodes
+          // This handles complex hierarchies where transforms are baked into world matrices
           const offset = center.negate();
-          const meshSet = new Set(result.meshes);
-          const trueRootNodes = result.meshes.filter(mesh => {
-            // No parent = root
-            if (!mesh.parent) return true;
-            // Parent not in our loaded meshes = root (parent is scene or external)
-            return !meshSet.has(mesh.parent as any);
-          });
 
-          console.log(`Found ${trueRootNodes.length} true root nodes to translate`);
-          trueRootNodes.forEach(node => {
-            console.log(`  Root: ${node.name} at (${node.position.x.toFixed(2)}, ${node.position.y.toFixed(2)}, ${node.position.z.toFixed(2)})`);
-          });
+          console.log(`Moving ALL ${result.meshes.length} meshes by offset: (${offset.x.toFixed(2)}, ${offset.y.toFixed(2)}, ${offset.z.toFixed(2)})`);
 
-          // Move only true root nodes (their children will follow)
-          trueRootNodes.forEach((mesh) => {
+          // Move EVERY mesh directly (including instances)
+          result.meshes.forEach((mesh) => {
+            // Get world position before moving
+            const worldPosBefore = mesh.getAbsolutePosition().clone();
+
+            // Move the mesh in world space
             mesh.position.addInPlace(offset);
+
+            // If it's a Mesh with instances, move instances too
+            if (mesh instanceof Mesh && mesh.instances && mesh.instances.length > 0) {
+              mesh.instances.forEach(instance => {
+                instance.position.addInPlace(offset);
+              });
+            }
           });
 
           // Force world matrix and bounding info update for ALL meshes
@@ -800,9 +809,8 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           // Debug: Log first few mesh positions and vertex counts
           console.log('Debug: First 5 meshes after centering:');
           result.meshes.slice(0, 5).forEach((mesh, i) => {
-            if (mesh instanceof Mesh) {
-              console.log(`  Mesh ${i}: ${mesh.name}, pos=(${mesh.position.x.toFixed(2)}, ${mesh.position.y.toFixed(2)}, ${mesh.position.z.toFixed(2)}), vertices=${mesh.getTotalVertices()}, visible=${mesh.isVisible}, enabled=${mesh.isEnabled()}`);
-            }
+            const worldPos = mesh.getAbsolutePosition();
+            console.log(`  Mesh ${i}: ${mesh.name}, worldPos=(${worldPos.x.toFixed(2)}, ${worldPos.y.toFixed(2)}, ${worldPos.z.toFixed(2)}), vertices=${mesh.getTotalVertices()}, visible=${mesh.isVisible}, enabled=${mesh.isEnabled()}`);
           });
         }
 
@@ -887,7 +895,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       <canvas ref={canvasRef} style={styles.canvas()} />
 
       {/* Toolbar */}
-      <div style={styles.toolbar()}>
+      {showUI && <div style={styles.toolbar()}>
         {/* Toggle buttons row */}
         <div style={styles.toolbarRow()}>
           <button
@@ -1046,10 +1054,10 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
             B
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Compression Level Selector */}
-      <div
+      {showUI && <div
         style={{
           position: 'absolute',
           bottom: '20px',
@@ -1438,7 +1446,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
             L3 Heavy
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Loading Indicator */}
       {isLoading && (
@@ -1485,7 +1493,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         </div>
       )}
 
-      {loadedModel && (
+      {loadedModel && showUI && (
         <button
           onClick={() => fitToView()}
           style={styles.button()}
@@ -1500,6 +1508,40 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         </button>
       )}
 
+      {/* Toggle UI Button */}
+      {loadedModel && (
+        <button
+          onClick={() => setShowUI(!showUI)}
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '80px',
+            padding: '6px 12px',
+            backgroundColor: 'rgba(59, 130, 246, 0.9)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            fontSize: '11px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+            transition: 'all 0.2s ease',
+            zIndex: 100,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 1)';
+            e.currentTarget.style.transform = 'translateY(-1px)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.9)';
+            e.currentTarget.style.transform = 'translateY(0)';
+          }}
+          title="Toggle UI visibility"
+        >
+          {showUI ? 'UI' : 'UI'}
+        </button>
+      )}
+
       {/* Inspector Toggle Button */}
       {loadedModel && (
         <button
@@ -1511,23 +1553,37 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
             }
           }}
           style={{
-            ...styles.button(),
-            left: '130px',
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            padding: '6px 12px',
+            backgroundColor: 'rgba(59, 130, 246, 0.9)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            fontSize: '11px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+            transition: 'all 0.2s ease',
+            zIndex: 100,
           }}
           onMouseEnter={(e) => {
-            Object.assign(e.currentTarget.style, styles.buttonHover);
+            e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 1)';
+            e.currentTarget.style.transform = 'translateY(-1px)';
           }}
           onMouseLeave={(e) => {
-            Object.assign(e.currentTarget.style, styles.buttonNormal);
+            e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.9)';
+            e.currentTarget.style.transform = 'translateY(0)';
           }}
           title="Toggle Babylon.js Inspector"
         >
-          Inspector
+          Insp
         </button>
       )}
 
       {/* Performance Monitor */}
-      {showPerformanceMonitor && loadedModel && (
+      {showPerformanceMonitor && loadedModel && showUI && (
         <PerformanceMonitor
           scene={sceneRef.current}
           engine={engineRef.current}
@@ -1537,7 +1593,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       )}
 
       {/* Selection Info Panel */}
-      {selectedMesh && (
+      {selectedMesh && showUI && (
         <div style={{
           position: 'fixed',
           top: '10px',

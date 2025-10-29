@@ -3,7 +3,7 @@
 # gltfpack Compression Test Script
 # Tests 3 compression levels on the baseline GLB file
 
-INPUT_FILE="mbn_1586_011_p5_xar7_150_3d_xx_ar_Architekturmodell_aw0_o.glb"
+INPUT_FILE="public/models/bilton_centered_test.glb"
 BASELINE_SIZE=$(stat -c%s "$INPUT_FILE")
 
 echo "=========================================="
