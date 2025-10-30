@@ -41,8 +41,21 @@ export const calculateBoundingBox = (meshes: AbstractMesh[]) => {
         console.log(`Mesh ${index} (${mesh.name}): min=(${meshMin.x.toFixed(2)}, ${meshMin.y.toFixed(2)}, ${meshMin.z.toFixed(2)}), max=(${meshMax.x.toFixed(2)}, ${meshMax.y.toFixed(2)}, ${meshMax.z.toFixed(2)})`);
       }
 
-      // Skip if bounding box is invalid
+      // Skip if bounding box is invalid (equal points)
       if (meshMin.equals(meshMax)) {
+        skippedMeshCount++;
+        return;
+      }
+
+      // Skip if bounding box contains infinity or NaN
+      const hasInfinity =
+        !isFinite(meshMin.x) || !isFinite(meshMin.y) || !isFinite(meshMin.z) ||
+        !isFinite(meshMax.x) || !isFinite(meshMax.y) || !isFinite(meshMax.z);
+
+      if (hasInfinity) {
+        if (index < 10) {
+          console.warn(`Mesh ${index} has infinite bounds, skipping`);
+        }
         skippedMeshCount++;
         return;
       }

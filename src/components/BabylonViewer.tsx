@@ -45,6 +45,15 @@ interface BabylonViewerProps {
   showPerformanceMonitor?: boolean;
 }
 
+interface LoadTimingBreakdown {
+  importTime: number;
+  materialsTime: number;
+  shadowsTime: number;
+  freezeTime: number;
+  sceneReadyTime: number;
+  totalTime: number;
+}
+
 export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   width = '100%',
   height = '100vh',
@@ -70,6 +79,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
   const [loadTime, setLoadTime] = useState<number | undefined>(undefined);
+  const [loadTimingBreakdown, setLoadTimingBreakdown] = useState<LoadTimingBreakdown | undefined>(undefined);
   const [currentModelName, setCurrentModelName] = useState<string>('');
   const [optimizerEnabled, setOptimizerEnabled] = useState(true);
   const [selectedMesh, setSelectedMesh] = useState<AbstractMesh | null>(null);
@@ -562,7 +572,25 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         const startTime = Date.now();
         let progressEventCount = 0;
 
+        // Performance timing markers
+        const perfTiming = {
+          start: startTime,
+          importStart: 0,
+          importEnd: 0,
+          materialsStart: 0,
+          materialsEnd: 0,
+          shadowsStart: 0,
+          shadowsEnd: 0,
+          freezeStart: 0,
+          freezeEnd: 0,
+          sceneReadyStart: 0,
+          sceneReadyEnd: 0,
+          totalEnd: 0
+        };
+
+        console.log('=== LOAD PERFORMANCE TRACKING START ===');
         console.log('Starting ImportMeshAsync...');
+        perfTiming.importStart = Date.now();
 
         // Load the GLB file with real progress tracking
         const result = await SceneLoader.ImportMeshAsync(
@@ -589,7 +617,8 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           '.glb'
         );
 
-        console.log('ImportMeshAsync completed!');
+        perfTiming.importEnd = Date.now();
+        console.log(`ImportMeshAsync completed! (${((perfTiming.importEnd - perfTiming.importStart) / 1000).toFixed(2)}s)`);
         console.log('Loaded meshes:', result.meshes.length);
         console.log('Mesh names:', result.meshes.map(m => m.name));
 
@@ -602,11 +631,14 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
 
         // === APPLY REALISTIC MATERIALS ===
         console.log('=== APPLYING REALISTIC MATERIALS ===');
+        perfTiming.materialsStart = Date.now();
         const matLib = new MaterialLibrary(sceneRef.current);
         const materialStats = matLib.applyToMeshes(result.meshes as Mesh[], 1.0);
-        console.log(`Material application complete: ${materialStats.replaced}/${materialStats.total} materials replaced`);
+        perfTiming.materialsEnd = Date.now();
+        console.log(`Material application complete: ${materialStats.replaced}/${materialStats.total} materials replaced (${((perfTiming.materialsEnd - perfTiming.materialsStart) / 1000).toFixed(2)}s)`);
 
         // Enable shadows for loaded meshes
+        perfTiming.shadowsStart = Date.now();
         let shadowCount = 0;
         result.meshes.forEach((mesh) => {
           if (mesh instanceof Mesh && shadowGeneratorRef.current) {
@@ -614,13 +646,45 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
             shadowCount++;
           }
         });
-        console.log(`Shadows enabled for ${shadowCount} meshes`);
+        perfTiming.shadowsEnd = Date.now();
+        console.log(`Shadows enabled for ${shadowCount} meshes (${((perfTiming.shadowsEnd - perfTiming.shadowsStart) / 1000).toFixed(2)}s)`);
 
         // Frame the loaded model - wait for scene to be ready first
         console.log('Waiting for scene to be ready before framing...');
+        perfTiming.sceneReadyStart = Date.now();
         sceneRef.current.executeWhenReady(() => {
-          console.log('Scene ready, framing model...');
+          perfTiming.sceneReadyEnd = Date.now();
+          console.log(`Scene ready, framing model... (${((perfTiming.sceneReadyEnd - perfTiming.sceneReadyStart) / 1000).toFixed(2)}s)`);
           fitToView(result.meshes);
+
+          // Mark total time when scene is fully interactive
+          perfTiming.totalEnd = Date.now();
+          const totalTime = (perfTiming.totalEnd - perfTiming.start) / 1000;
+          const importTime = (perfTiming.importEnd - perfTiming.importStart) / 1000;
+          const materialsTime = (perfTiming.materialsEnd - perfTiming.materialsStart) / 1000;
+          const shadowsTime = (perfTiming.shadowsEnd - perfTiming.shadowsStart) / 1000;
+          const freezeTime = (perfTiming.freezeEnd - perfTiming.freezeStart) / 1000;
+          const sceneReadyTime = (perfTiming.sceneReadyEnd - perfTiming.sceneReadyStart) / 1000;
+
+          console.log('=== LOAD PERFORMANCE SUMMARY ===');
+          console.log(`  File Import:      ${importTime.toFixed(2)}s`);
+          console.log(`  Materials:        ${materialsTime.toFixed(2)}s`);
+          console.log(`  Shadows:          ${shadowsTime.toFixed(2)}s`);
+          console.log(`  Mesh Freezing:    ${freezeTime.toFixed(2)}s`);
+          console.log(`  Scene Ready Wait: ${sceneReadyTime.toFixed(2)}s`);
+          console.log(`  ─────────────────────────────`);
+          console.log(`  TOTAL TIME:       ${totalTime.toFixed(2)}s`);
+          console.log('=================================');
+
+          // Update state with timing breakdown
+          setLoadTimingBreakdown({
+            importTime,
+            materialsTime,
+            shadowsTime,
+            freezeTime,
+            sceneReadyTime,
+            totalTime,
+          });
         });
 
         // Apply performance optimizations
@@ -628,6 +692,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
 
         // Freeze all meshes (static models don't need transform updates)
         console.log('Freezing meshes...');
+        perfTiming.freezeStart = Date.now();
         let frozenCount = 0;
         result.meshes.forEach((mesh) => {
           if (mesh instanceof Mesh) {
@@ -635,7 +700,8 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
             frozenCount++;
           }
         });
-        console.log(`Frozen ${frozenCount} meshes`);
+        perfTiming.freezeEnd = Date.now();
+        console.log(`Frozen ${frozenCount} meshes (${((perfTiming.freezeEnd - perfTiming.freezeStart) / 1000).toFixed(2)}s)`);
 
         // Start Scene Optimizer if enabled
         if (optimizerEnabled) {
@@ -1221,6 +1287,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           engine={engineRef.current}
           instrumentation={instrumentationRef.current}
           loadTime={loadTime}
+          loadTimingBreakdown={loadTimingBreakdown}
         />
       )}
 

@@ -1,7 +1,65 @@
 # BabylonJS Large IFC PoC - Projektstatus
 
-**Letztes Update:** 2025-10-29
-**Aktueller Stand:** Phase 2 - Strukturelle Optimierungen
+**Letztes Update:** 2025-10-30
+**Aktueller Stand:** Phase 2 - glTF-Transform Optimierung & Performance Monitoring
+
+---
+
+## 🆕 Aktuelle Änderungen (2025-10-30)
+
+### ✅ glTF-Transform Pipeline (PRODUCTION READY)
+**Status:** Vollständig implementiert und getestet
+**Dokumentation:** `GLTF_TRANSFORM_OPTIMIZATION.md`
+
+**Pipeline-Migration:**
+- ❌ **Entfernt**: gltfpack (Draco/Meshopt Compression)
+  - Grund: Selektionsprobleme in Babylon.js, nicht optimal für BIM
+- ✅ **Neu**: gltf-transform (Quantization + Material Deduplication)
+  - Bessere Babylon.js-Kompatibilität
+  - Bewährte Ergebnisse für BIM-Modelle
+
+**Ergebnisse:**
+| Modell | Baseline | Optimiert | Reduktion |
+|--------|----------|-----------|-----------|
+| MBN (klein) | 38 MB | 14 MB | 63.2% |
+| Bilton (groß) | 630 MB | 334 MB | 47.0% |
+
+**Features:**
+- ✅ 16-bit Quantization (KHR_mesh_quantization)
+- ✅ Material Deduplication (6,852 → 50-100 Materialien)
+- ✅ Volle Mesh-Selektion funktioniert
+- ✅ Keine visuellen Artefakte
+
+### ✅ Performance Timing UI (COMPLETED)
+**Status:** Implementiert in PerformanceMonitor
+**Files:** `BabylonViewer.tsx:565-688`, `PerformanceMonitor.tsx`
+
+**Features:**
+- Detailliertes Load-Timing für jede Phase:
+  - File Import (ImportMeshAsync)
+  - Materials Application
+  - Shadow Generator Setup
+  - Mesh Freezing
+  - Scene Ready Wait
+- Live-Anzeige im Performance Panel (top-right)
+- Hilft bei Identifikation von Bottlenecks
+
+**Beispiel-Output:**
+```
+Performance Metrics
+───────────────────
+Load Time: 5.42s
+
+Load Breakdown
+───────────────────
+  File Import:      2.10s
+  Materials:        1.20s
+  Shadows:          0.50s
+  Mesh Freezing:    0.30s
+  Scene Ready:      1.32s
+───────────────────
+  Total:            5.42s
+```
 
 ---
 

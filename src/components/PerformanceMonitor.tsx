@@ -11,11 +11,21 @@ interface PerformanceMetrics {
   loadTime?: number; // seconds
 }
 
+interface LoadTimingBreakdown {
+  importTime: number;
+  materialsTime: number;
+  shadowsTime: number;
+  freezeTime: number;
+  sceneReadyTime: number;
+  totalTime: number;
+}
+
 interface PerformanceMonitorProps {
   scene: Scene | null;
   engine: Engine | null;
   instrumentation: SceneInstrumentation | null;
   loadTime?: number;
+  loadTimingBreakdown?: LoadTimingBreakdown;
 }
 
 export const PerformanceMonitor: React.FC<PerformanceMonitorProps> = ({
@@ -23,6 +33,7 @@ export const PerformanceMonitor: React.FC<PerformanceMonitorProps> = ({
   engine,
   instrumentation,
   loadTime,
+  loadTimingBreakdown,
 }) => {
   const [metrics, setMetrics] = useState<PerformanceMetrics>({
     fps: 0,
@@ -73,6 +84,18 @@ export const PerformanceMonitor: React.FC<PerformanceMonitorProps> = ({
         )}
         {metrics.loadTime && (
           <MetricRow label="Load Time" value={`${metrics.loadTime.toFixed(2)}s`} />
+        )}
+        {loadTimingBreakdown && (
+          <>
+            <div style={styles.separator}>Load Breakdown</div>
+            <MetricRow label="  File Import" value={`${loadTimingBreakdown.importTime.toFixed(2)}s`} />
+            <MetricRow label="  Materials" value={`${loadTimingBreakdown.materialsTime.toFixed(2)}s`} />
+            <MetricRow label="  Shadows" value={`${loadTimingBreakdown.shadowsTime.toFixed(2)}s`} />
+            <MetricRow label="  Mesh Freezing" value={`${loadTimingBreakdown.freezeTime.toFixed(2)}s`} />
+            <MetricRow label="  Scene Ready" value={`${loadTimingBreakdown.sceneReadyTime.toFixed(2)}s`} />
+            <div style={styles.separator}></div>
+            <MetricRow label="  Total" value={`${loadTimingBreakdown.totalTime.toFixed(2)}s`} color="#4ade80" />
+          </>
         )}
       </div>
     </div>
@@ -133,5 +156,13 @@ const styles = {
   },
   value: {
     fontWeight: 'bold',
+  },
+  separator: {
+    fontSize: '11px',
+    opacity: 0.6,
+    marginTop: '6px',
+    marginBottom: '4px',
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+    paddingTop: '6px',
   },
 };
