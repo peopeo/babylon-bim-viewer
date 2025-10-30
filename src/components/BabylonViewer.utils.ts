@@ -22,8 +22,8 @@ export const calculateBoundingBox = (meshes: AbstractMesh[]) => {
       return;
     }
 
-    // Force update world matrix
-    mesh.computeWorldMatrix(true);
+    // World matrix is already computed by Babylon.js during scene.executeWhenReady()
+    // No need to force recomputation here - just use the cached boundingInfo
 
     try {
       const boundingInfo = mesh.getBoundingInfo();

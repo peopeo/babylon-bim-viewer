@@ -654,8 +654,15 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         perfTiming.sceneReadyStart = Date.now();
         sceneRef.current.executeWhenReady(() => {
           perfTiming.sceneReadyEnd = Date.now();
-          console.log(`Scene ready, framing model... (${((perfTiming.sceneReadyEnd - perfTiming.sceneReadyStart) / 1000).toFixed(2)}s)`);
+          const sceneReadyWaitTime = (perfTiming.sceneReadyEnd - perfTiming.sceneReadyStart) / 1000;
+          console.log(`Scene ready (Babylon.js internal processing): ${sceneReadyWaitTime.toFixed(2)}s`);
+
+          // Measure camera framing separately
+          const framingStart = Date.now();
           fitToView(result.meshes);
+          const framingEnd = Date.now();
+          const framingTime = (framingEnd - framingStart) / 1000;
+          console.log(`Camera framing (bounding box + fit): ${framingTime.toFixed(2)}s`);
 
           // Mark total time when scene is fully interactive
           perfTiming.totalEnd = Date.now();
@@ -671,7 +678,8 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           console.log(`  Materials:        ${materialsTime.toFixed(2)}s`);
           console.log(`  Shadows:          ${shadowsTime.toFixed(2)}s`);
           console.log(`  Mesh Freezing:    ${freezeTime.toFixed(2)}s`);
-          console.log(`  Scene Ready Wait: ${sceneReadyTime.toFixed(2)}s`);
+          console.log(`  Scene Ready Wait: ${sceneReadyWaitTime.toFixed(2)}s`);
+          console.log(`  Camera Framing:   ${framingTime.toFixed(2)}s`);
           console.log(`  ─────────────────────────────`);
           console.log(`  TOTAL TIME:       ${totalTime.toFixed(2)}s`);
           console.log('=================================');
