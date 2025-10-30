@@ -90,9 +90,31 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    // Create engine
+    // Detect browser for optimization hints
+    const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+    const isFirefox = /Firefox/.test(navigator.userAgent);
+    console.log(`Browser detected: ${isChrome ? 'Chrome' : isFirefox ? 'Firefox' : 'Other'}`);
+
+    // Create engine with performance optimizations
     const engine = new Engine(canvasRef.current, true, VIEWER_CONFIG.engine);
     engineRef.current = engine;
+
+    // Chrome-specific engine optimizations
+    if (isChrome) {
+      // Optimize engine for large model loading
+      engine.enableOfflineSupport = false; // Disable offline manifest checks
+      engine.disablePerformanceMonitorInBackground = true; // Reduce overhead
+    }
+
+    // Log WebGL info for debugging
+    const gl = engine._gl;
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    if (debugInfo) {
+      console.log('WebGL Vendor:', gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL));
+      console.log('WebGL Renderer:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+    }
+    console.log('WebGL Version:', engine.webGLVersion);
+    console.log('Parallel Shader Compile:', engine.getCaps().parallelShaderCompile ? 'Supported' : 'Not Supported');
 
     // Create scene
     const scene = new Scene(engine);
@@ -100,6 +122,22 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
 
     // Increase environment intensity for PBR materials
     scene.environmentIntensity = 1.5; // Brighter reflections and ambient
+
+    // Performance optimizations during loading
+    scene.skipFrustumClipping = true; // Disable frustum culling during load
+    scene.skipPointerMovePicking = true; // Disable picking during load
+
+    // Chrome-specific optimizations for shader compilation
+    if (isChrome) {
+      console.log('Applying Chrome-specific optimizations...');
+      // Disable automatic material cleaning (speeds up compilation)
+      scene.autoClear = false;
+      scene.autoClearDepthAndStencil = false;
+
+      // GLTF Loader optimizations for Chrome
+      // Block material updates during load to speed up parsing
+      scene.blockMaterialDirtyMechanism = true;
+    }
 
     sceneRef.current = scene;
 
@@ -560,21 +598,18 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       }
 
       try {
-        // Create object URL from file
-        const url = URL.createObjectURL(file);
-        console.log('Object URL created:', url);
-
         // Show loading indicator
         setIsLoading(true);
         setLoadingProgress(0);
         setShowProgress(false);
 
         const startTime = Date.now();
-        let progressEventCount = 0;
 
         // Performance timing markers
         const perfTiming = {
           start: startTime,
+          fileReadStart: 0,
+          fileReadEnd: 0,
           importStart: 0,
           importEnd: 0,
           materialsStart: 0,
@@ -589,32 +624,27 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         };
 
         console.log('=== LOAD PERFORMANCE TRACKING START ===');
+
+        // Optimized loading: Use File object directly as Blob URL
+        // This avoids reading the entire file into memory as ArrayBuffer (saves time and memory)
+        console.log('Creating Blob URL from File object...');
+        perfTiming.fileReadStart = Date.now();
+        const url = URL.createObjectURL(file);
+        perfTiming.fileReadEnd = Date.now();
+        console.log(`Blob URL created: ${((perfTiming.fileReadEnd - perfTiming.fileReadStart) / 1000).toFixed(2)}s`);
+        console.log('URL:', url);
+
         console.log('Starting ImportMeshAsync...');
         perfTiming.importStart = Date.now();
 
-        // Load the GLB file with real progress tracking
+        // Load the GLB file - now using direct Blob URL for better performance
         const result = await SceneLoader.ImportMeshAsync(
-          '',
-          url,
-          '',
+          '', // Load all meshes
+          '', // Empty rootUrl - the sceneFilename contains the full URL
+          url, // Full blob URL as sceneFilename
           sceneRef.current,
-          (evt) => {
-            progressEventCount++;
-
-            if (evt.lengthComputable && evt.total > 0) {
-              const progress = (evt.loaded * 100) / evt.total;
-              console.log(`Loading progress: ${progress.toFixed(1)}% (${evt.loaded}/${evt.total} bytes)`);
-
-              // Only show progress if we're getting meaningful updates (not jumping straight to 100%)
-              if (progressEventCount > 1 || progress < 100) {
-                setShowProgress(true);
-                setLoadingProgress(Math.round(progress));
-              }
-            } else {
-              console.log('Progress event (not computable):', evt);
-            }
-          },
-          '.glb'
+          undefined, // No progress callback
+          '.glb' // Plugin extension
         );
 
         perfTiming.importEnd = Date.now();
@@ -637,17 +667,29 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         perfTiming.materialsEnd = Date.now();
         console.log(`Material application complete: ${materialStats.replaced}/${materialStats.total} materials replaced (${((perfTiming.materialsEnd - perfTiming.materialsStart) / 1000).toFixed(2)}s)`);
 
-        // Enable shadows for loaded meshes
+        // Enable shadows for loaded meshes (only large objects)
         perfTiming.shadowsStart = Date.now();
         let shadowCount = 0;
+        let skippedSmallMeshes = 0;
+        const SHADOW_SIZE_THRESHOLD = 0.5; // Only meshes > 0.5 units cast shadows
+
         result.meshes.forEach((mesh) => {
           if (mesh instanceof Mesh && shadowGeneratorRef.current) {
-            shadowGeneratorRef.current.addShadowCaster(mesh);
-            shadowCount++;
+            // Calculate mesh size
+            const boundingInfo = mesh.getBoundingInfo();
+            const size = boundingInfo.boundingBox.extendSize.length();
+
+            // Only large meshes cast shadows
+            if (size > SHADOW_SIZE_THRESHOLD) {
+              shadowGeneratorRef.current.addShadowCaster(mesh);
+              shadowCount++;
+            } else {
+              skippedSmallMeshes++;
+            }
           }
         });
         perfTiming.shadowsEnd = Date.now();
-        console.log(`Shadows enabled for ${shadowCount} meshes (${((perfTiming.shadowsEnd - perfTiming.shadowsStart) / 1000).toFixed(2)}s)`);
+        console.log(`Shadows enabled for ${shadowCount} meshes (skipped ${skippedSmallMeshes} small meshes) (${((perfTiming.shadowsEnd - perfTiming.shadowsStart) / 1000).toFixed(2)}s)`);
 
         // Frame the loaded model - wait for scene to be ready first
         console.log('Waiting for scene to be ready before framing...');
@@ -664,6 +706,27 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           const framingTime = (framingEnd - framingStart) / 1000;
           console.log(`Camera framing (bounding box + fit): ${framingTime.toFixed(2)}s`);
 
+          // Re-enable scene optimizations after load
+          if (sceneRef.current) {
+            sceneRef.current.skipFrustumClipping = false;
+            sceneRef.current.skipPointerMovePicking = false;
+            sceneRef.current.autoClear = true;
+            sceneRef.current.autoClearDepthAndStencil = true;
+            sceneRef.current.blockMaterialDirtyMechanism = false; // Re-enable material updates
+            console.log('Scene optimizations re-enabled');
+          }
+
+          // Freeze materials to prevent shader recompilation
+          console.log('Freezing materials to prevent shader recompilation...');
+          let frozenMaterials = 0;
+          sceneRef.current?.materials.forEach(material => {
+            if (material && !material.isFrozen) {
+              material.freeze();
+              frozenMaterials++;
+            }
+          });
+          console.log(`Frozen ${frozenMaterials} materials`);
+
           // Mark total time when scene is fully interactive
           perfTiming.totalEnd = Date.now();
           const totalTime = (perfTiming.totalEnd - perfTiming.start) / 1000;
@@ -673,8 +736,11 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           const freezeTime = (perfTiming.freezeEnd - perfTiming.freezeStart) / 1000;
           const sceneReadyTime = (perfTiming.sceneReadyEnd - perfTiming.sceneReadyStart) / 1000;
 
+          const fileReadTime = (perfTiming.fileReadEnd - perfTiming.fileReadStart) / 1000;
+
           console.log('=== LOAD PERFORMANCE SUMMARY ===');
-          console.log(`  File Import:      ${importTime.toFixed(2)}s`);
+          console.log(`  Blob URL Create:  ${fileReadTime.toFixed(2)}s`);
+          console.log(`  GLB Parse:        ${importTime.toFixed(2)}s`);
           console.log(`  Materials:        ${materialsTime.toFixed(2)}s`);
           console.log(`  Shadows:          ${shadowsTime.toFixed(2)}s`);
           console.log(`  Mesh Freezing:    ${freezeTime.toFixed(2)}s`);

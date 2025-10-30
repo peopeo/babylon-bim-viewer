@@ -8,6 +8,9 @@ export const VIEWER_CONFIG = {
   engine: {
     preserveDrawingBuffer: true,
     stencil: true,
+    // Performance optimizations for shader compilation
+    doNotHandleContextLost: true, // Faster initialization
+    powerPreference: 'high-performance', // Use discrete GPU if available
   },
 
   // Scene settings
