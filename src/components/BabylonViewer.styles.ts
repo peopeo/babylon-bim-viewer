@@ -12,6 +12,7 @@ export const styles = {
     position: 'relative',
     width,
     height,
+    overflow: 'hidden',
   }),
 
   canvas: (): CSSProperties => ({
@@ -46,14 +47,19 @@ export const styles = {
   }),
 
   emptyState: (): CSSProperties => ({
-    position: 'absolute',
+    position: 'fixed',
     top: '50%',
     left: '50%',
     transform: 'translate(-50%, -50%)',
     textAlign: 'center',
-    color: colors.textLight,
+    color: 'white',
     fontFamily: fonts.default,
     pointerEvents: 'none',
+    zIndex: 9999,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    padding: '40px',
+    borderRadius: '12px',
+    border: '2px solid rgba(74, 222, 128, 0.5)',
   }),
 
   emptyStateEmoji: (): CSSProperties => ({

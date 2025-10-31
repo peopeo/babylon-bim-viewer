@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Scene, Engine, SceneInstrumentation } from '@babylonjs/core';
+import { Scene, Engine, WebGPUEngine, SceneInstrumentation } from '@babylonjs/core';
 
 interface PerformanceMetrics {
   fps: number;
@@ -22,10 +22,12 @@ interface LoadTimingBreakdown {
 
 interface PerformanceMonitorProps {
   scene: Scene | null;
-  engine: Engine | null;
+  engine: Engine | WebGPUEngine | null;
   instrumentation: SceneInstrumentation | null;
   loadTime?: number;
   loadTimingBreakdown?: LoadTimingBreakdown;
+  engineType?: 'WebGPU' | 'WebGL';
+  isFallback?: boolean;
 }
 
 export const PerformanceMonitor: React.FC<PerformanceMonitorProps> = ({
@@ -34,6 +36,8 @@ export const PerformanceMonitor: React.FC<PerformanceMonitorProps> = ({
   instrumentation,
   loadTime,
   loadTimingBreakdown,
+  engineType = 'WebGL',
+  isFallback = false,
 }) => {
   const [metrics, setMetrics] = useState<PerformanceMetrics>({
     fps: 0,
@@ -74,6 +78,12 @@ export const PerformanceMonitor: React.FC<PerformanceMonitorProps> = ({
     <div style={styles.container}>
       <div style={styles.header}>Performance Metrics</div>
       <div style={styles.content}>
+        <MetricRow
+          label="Render Engine"
+          value={isFallback ? `${engineType} (fallback)` : engineType}
+          color={engineType === 'WebGPU' ? '#a78bfa' : '#60a5fa'}
+        />
+        <div style={styles.separator}></div>
         <MetricRow label="FPS" value={metrics.fps} color={getFpsColor(metrics.fps)} />
         <MetricRow label="Draw Calls" value={metrics.drawCalls} />
         <MetricRow label="Total Vertices" value={metrics.totalVertices.toLocaleString()} />

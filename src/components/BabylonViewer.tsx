@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Engine,
+  WebGPUEngine,
   Scene,
   ArcRotateCamera,
   HemisphericLight,
@@ -22,6 +23,8 @@ import {
   PostProcessesOptimization,
   HighlightLayer,
   Color3,
+  Color4,
+  Logger,
 } from '@babylonjs/core';
 import { GridMaterial } from '@babylonjs/materials';
 import '@babylonjs/loaders/glTF';
@@ -54,6 +57,10 @@ interface LoadTimingBreakdown {
   totalTime: number;
 }
 
+export interface BabylonViewerHandle {
+  loadModelFromPath: (modelPath: string, modelName: string) => Promise<void>;
+}
+
 export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   width = '100%',
   height = '100vh',
@@ -61,7 +68,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   showPerformanceMonitor = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const engineRef = useRef<Engine | null>(null);
+  const engineRef = useRef<Engine | WebGPUEngine | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const shadowGeneratorRef = useRef<ShadowGenerator | null>(null);
   const axesViewerRef = useRef<AxesViewer | null>(null);
@@ -84,37 +91,142 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
   const [optimizerEnabled, setOptimizerEnabled] = useState(true);
   const [selectedMesh, setSelectedMesh] = useState<AbstractMesh | null>(null);
   const [showUI, setShowUI] = useState(true);
+  const [engineType, setEngineType] = useState<'WebGPU' | 'WebGL'>('WebGL');
+  const [isEngineFallback, setIsEngineFallback] = useState(false);
+  const [isEngineReady, setIsEngineReady] = useState(false);
   const highlightLayerRef = useRef<HighlightLayer | null>(null);
+  const cameraRef = useRef<ArcRotateCamera | null>(null);
+
 
   // Initialize Babylon.js scene
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    // Detect browser for optimization hints
-    const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
-    const isFirefox = /Firefox/.test(navigator.userAgent);
-    console.log(`Browser detected: ${isChrome ? 'Chrome' : isFirefox ? 'Firefox' : 'Other'}`);
+    let isMounted = true;
 
-    // Create engine with performance optimizations
-    const engine = new Engine(canvasRef.current, true, VIEWER_CONFIG.engine);
-    engineRef.current = engine;
+    const initEngine = async () => {
+      if (!canvasRef.current) return;
 
-    // Chrome-specific engine optimizations
-    if (isChrome) {
-      // Optimize engine for large model loading
-      engine.enableOfflineSupport = false; // Disable offline manifest checks
-      engine.disablePerformanceMonitorInBackground = true; // Reduce overhead
-    }
+      // Detect browser for optimization hints
+      const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+      const isFirefox = /Firefox/.test(navigator.userAgent);
+      console.log(`Browser detected: ${isChrome ? 'Chrome' : isFirefox ? 'Firefox' : 'Other'}`);
 
-    // Log WebGL info for debugging
-    const gl = engine._gl;
-    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-    if (debugInfo) {
-      console.log('WebGL Vendor:', gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL));
-      console.log('WebGL Renderer:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
-    }
-    console.log('WebGL Version:', engine.webGLVersion);
-    console.log('Parallel Shader Compile:', engine.getCaps().parallelShaderCompile ? 'Supported' : 'Not Supported');
+      let engine: Engine | WebGPUEngine;
+      let usingWebGPU = false;
+      let fallback = false;
+
+      // Set up error filtering BEFORE WebGPU initialization
+      const originalConsoleError = console.error;
+      const originalConsoleWarn = console.warn;
+
+      // Try WebGPU first
+      try {
+        console.log('=== ATTEMPTING WEBGPU INITIALIZATION ===');
+        const webGPUSupported = await WebGPUEngine.IsSupportedAsync;
+
+        if (webGPUSupported) {
+          console.log('WebGPU is supported! Initializing WebGPU engine...');
+
+          // Set up error filtering for WebGPU errors BEFORE engine creation
+          console.error = (...args: any[]) => {
+            const message = args.join(' ');
+            if (
+              message.includes('CopyVideoToTexture') ||
+              message.includes('InternalVideoPipeline') ||
+              message.includes('Shader module creation failed') ||
+              message.includes('WebGPU uncaptured error')
+            ) {
+              return;
+            }
+            originalConsoleError.apply(console, args);
+          };
+
+          console.warn = (...args: any[]) => {
+            const message = args.join(' ');
+            if (
+              message.includes('CopyVideoToTexture') ||
+              message.includes('InternalVideoPipeline') ||
+              message.includes("Can't find buffer") ||
+              message.includes('Light0') ||
+              message.includes('draw context')
+            ) {
+              return;
+            }
+            originalConsoleWarn.apply(console, args);
+          };
+
+          // Filter Babylon.js Logger (BJS - prefix) for known WebGPU issues
+          const originalLogWarn = Logger.Warn;
+          Logger.Warn = (message: string | any[], limit?: number) => {
+            const msg = String(message);
+            // Known Babylon.js WebGPU issue: Light uniform buffers aren't initialized
+            // before materials try to use them. These warnings are harmless but spam console.
+            // References: https://forum.babylonjs.com/t/uncaught-error-unable-to-create-uniform-buffer/39840
+            if (
+              msg.includes("Can't find buffer") ||
+              msg.includes('Light0') ||
+              msg.includes('Make sure you bound it')
+            ) {
+              return; // Suppress known WebGPU initialization warnings
+            }
+            originalLogWarn.call(Logger, message, limit);
+          };
+
+          const webGPUEngine = new WebGPUEngine(canvasRef.current, {
+            antialias: true,
+            stencil: true,
+            alpha: true,  // Enable alpha channel for transparent background
+          });
+          await webGPUEngine.initAsync();
+          engine = webGPUEngine;
+          usingWebGPU = true;
+          console.log('✓ WebGPU engine initialized successfully');
+        } else {
+          console.log('WebGPU not supported by browser, falling back to WebGL');
+          engine = new Engine(canvasRef.current, true, VIEWER_CONFIG.engine);
+          fallback = true;
+        }
+      } catch (error) {
+        console.warn('WebGPU initialization failed, falling back to WebGL:', error);
+        engine = new Engine(canvasRef.current, true, VIEWER_CONFIG.engine);
+        fallback = true;
+      }
+
+      if (!isMounted) {
+        engine.dispose();
+        return;
+      }
+
+      // Update state with engine type
+      setEngineType(usingWebGPU ? 'WebGPU' : 'WebGL');
+      setIsEngineFallback(fallback);
+
+      engineRef.current = engine;
+
+      // Chrome-specific engine optimizations
+      if (isChrome && !usingWebGPU) {
+        // Optimize engine for large model loading (WebGL only)
+        engine.enableOfflineSupport = false; // Disable offline manifest checks
+        engine.disablePerformanceMonitorInBackground = true; // Reduce overhead
+      }
+
+      // Log engine info for debugging
+      if (usingWebGPU) {
+        console.log('=== WEBGPU ENGINE INFO ===');
+        console.log('Engine Type: WebGPU');
+        console.log('Hardware Scaling Level:', engine.getHardwareScalingLevel());
+      } else {
+        console.log('=== WEBGL ENGINE INFO ===');
+        const gl = (engine as Engine)._gl;
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          console.log('WebGL Vendor:', gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL));
+          console.log('WebGL Renderer:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+        }
+        console.log('WebGL Version:', (engine as Engine).webGLVersion);
+        console.log('Parallel Shader Compile:', engine.getCaps().parallelShaderCompile ? 'Supported' : 'Not Supported');
+      }
 
     // Create scene
     const scene = new Scene(engine);
@@ -266,42 +378,64 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       Inspector.Show(scene, {});
     }
 
-    // Store scene ref for inspector toggle
-    sceneRef.current = scene;
+    // Store scene ref for inspector toggle (remove duplicate, already set at line 194)
+    // sceneRef.current = scene;
 
-    // Render loop
+    // Mark engine as ready for file loading
+    setIsEngineReady(true);
+    console.log('Engine and scene initialization complete - ready for file loading');
+
+    // Start render loop for both WebGPU and WebGL
     engine.runRenderLoop(() => {
       scene.render();
     });
 
-    // Handle window resize
-    const handleResize = () => {
-      engine.resize();
+      // Handle window resize
+      const handleResize = () => {
+        engine.resize();
+      };
+      window.addEventListener('resize', handleResize);
+
+      // Return cleanup function for this engine initialization
+      return () => {
+        window.removeEventListener('resize', handleResize);
+
+        // Cleanup inspector FIRST before disposing scene
+        if (Inspector.IsVisible) {
+          try {
+            Inspector.Hide();
+          } catch (e) {
+            // Ignore DOM errors during cleanup
+            console.warn('Inspector cleanup warning (safe to ignore):', e);
+          }
+        }
+
+        if (axesViewerRef.current) {
+          axesViewerRef.current.dispose();
+        }
+        if (gizmoManagerRef.current) {
+          gizmoManagerRef.current.dispose();
+        }
+        scene.dispose();
+        engine.dispose();
+      };
     };
-    window.addEventListener('resize', handleResize);
+
+    // Call async initialization
+    let cleanup: (() => void) | undefined;
+    initEngine().then((cleanupFn) => {
+      if (isMounted) {
+        cleanup = cleanupFn;
+      }
+    });
 
     // Cleanup
     return () => {
-      window.removeEventListener('resize', handleResize);
-
-      // Cleanup inspector FIRST before disposing scene
-      if (Inspector.IsVisible) {
-        try {
-          Inspector.Hide();
-        } catch (e) {
-          // Ignore DOM errors during cleanup
-          console.warn('Inspector cleanup warning (safe to ignore):', e);
-        }
+      isMounted = false;
+      setIsEngineReady(false);
+      if (cleanup) {
+        cleanup();
       }
-
-      if (axesViewerRef.current) {
-        axesViewerRef.current.dispose();
-      }
-      if (gizmoManagerRef.current) {
-        gizmoManagerRef.current.dispose();
-      }
-      scene.dispose();
-      engine.dispose();
     };
   }, [enableInspector]);
 
@@ -330,6 +464,117 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedMesh]);
+
+  // Comprehensive cleanup function for disposing loaded models
+  const disposeLoadedModel = useCallback(async () => {
+    if (!loadedModel || !sceneRef.current) return;
+
+    console.log('=== DISPOSING PREVIOUS MODEL ===');
+
+    // Stop scene optimizer if running
+    if (sceneOptimizerRef.current) {
+      sceneOptimizerRef.current.stop();
+      sceneOptimizerRef.current.dispose();
+      sceneOptimizerRef.current = null;
+    }
+
+    // Clear selection
+    setSelectedMesh(null);
+    if (highlightLayerRef.current) {
+      highlightLayerRef.current.removeAllMeshes();
+    }
+
+    // Collect all materials and textures to dispose
+    const materialsToDispose = new Set<any>();
+    const texturesToDispose = new Set<any>();
+
+    loadedModel.forEach((mesh) => {
+      // Remove from shadow generator
+      if (shadowGeneratorRef.current && mesh instanceof Mesh) {
+        shadowGeneratorRef.current.removeShadowCaster(mesh);
+      }
+
+      // Collect materials and textures
+      if (mesh.material) {
+        materialsToDispose.add(mesh.material);
+
+        // Collect all texture types
+        const material = mesh.material as any;
+        const textureProps = [
+          'albedoTexture', 'bumpTexture', 'metallicTexture', 'diffuseTexture',
+          'emissiveTexture', 'opacityTexture', 'ambientTexture', 'reflectionTexture',
+          'refractionTexture', 'lightmapTexture', 'specularTexture'
+        ];
+        textureProps.forEach(prop => {
+          if (material[prop]) texturesToDispose.add(material[prop]);
+        });
+      }
+
+      // Dispose mesh (don't dispose materials yet, we'll do that after)
+      mesh.dispose(false, false);
+    });
+
+    // Dispose materials
+    console.log(`Disposing ${materialsToDispose.size} materials...`);
+    materialsToDispose.forEach((mat) => {
+      if (mat && !mat.isDisposed) {
+        mat.dispose(true, true); // Force dispose textures and shaders
+      }
+    });
+
+    // Dispose textures
+    console.log(`Disposing ${texturesToDispose.size} textures...`);
+    texturesToDispose.forEach((tex) => {
+      if (tex && !tex.isDisposed) {
+        tex.dispose();
+      }
+    });
+
+    setLoadedModel(null);
+
+    // Force WebGPU to flush GPU commands
+    if (engineRef.current && engineType === 'WebGPU') {
+      sceneRef.current.render();
+      console.log('WebGPU: Flushed GPU commands');
+    }
+
+    console.log('=== DISPOSAL COMPLETE ===');
+
+    // Give browser time to garbage collect before loading new model
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }, [loadedModel, engineType]);
+
+  // Make scene background transparent when no model is loaded (for WebGPU)
+  useEffect(() => {
+    if (!sceneRef.current) return;
+
+    if (!loadedModel && engineType === 'WebGPU') {
+      // Make scene background fully transparent to show empty state
+      sceneRef.current.clearColor = new Color4(0, 0, 0, 0);
+
+      // Hide ground and axes to prevent interference with drag/drop
+      if (groundRef.current) {
+        groundRef.current.isVisible = false;
+      }
+      if (axesViewerRef.current) {
+        axesViewerRef.current.dispose();
+        axesViewerRef.current = null;
+      }
+
+      console.log('WebGPU: Scene background made transparent, ground/axes hidden (no model loaded)');
+    } else {
+      // Restore normal background color
+      sceneRef.current.clearColor = VIEWER_CONFIG.scene.clearColor;
+
+      // Restore ground and axes if they should be visible
+      if (groundRef.current) {
+        groundRef.current.isVisible = showGrid;
+      }
+      if (!axesViewerRef.current && showAxes) {
+        axesViewerRef.current = new AxesViewer(sceneRef.current, VIEWER_CONFIG.axes.size);
+      }
+    }
+  }, [loadedModel, engineType, showGrid, showAxes]);
 
   // Fit to view function
   const fitToView = useCallback(
@@ -583,19 +828,16 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         return;
       }
 
-      if (!sceneRef.current) {
-        console.error('Scene not initialized');
+      if (!sceneRef.current || !isEngineReady) {
+        console.error('Scene not initialized or engine not ready yet');
+        alert('Please wait for the viewer to finish initializing...');
         return;
       }
 
       console.log('Scene is ready, starting load...');
 
-      // Remove previously loaded model
-      if (loadedModel) {
-        console.log('Disposing previous model...');
-        loadedModel.forEach((mesh) => mesh.dispose());
-        setLoadedModel(null);
-      }
+      // Dispose previous model if exists
+      await disposeLoadedModel();
 
       try {
         // Show loading indicator
@@ -808,7 +1050,7 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         setShowProgress(false);
       }
     },
-    [loadedModel, fitToView, optimizerEnabled, startSceneOptimizer]
+    [loadedModel, fitToView, optimizerEnabled, startSceneOptimizer, isEngineReady, disposeLoadedModel]
   );
 
   // Load model from path (for testing compression levels)
@@ -823,12 +1065,8 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         return;
       }
 
-      // Remove previously loaded model
-      if (loadedModel) {
-        console.log('Disposing previous model...');
-        loadedModel.forEach((mesh) => mesh.dispose());
-        setLoadedModel(null);
-      }
+      // Dispose previous model if exists
+      await disposeLoadedModel();
 
       try {
         // Show loading indicator
@@ -1035,8 +1273,22 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         setShowProgress(false);
       }
     },
-    [loadedModel, fitToView, optimizerEnabled, startSceneOptimizer]
+    [loadedModel, fitToView, optimizerEnabled, startSceneOptimizer, disposeLoadedModel]
   );
+
+  // Expose loadModelFromPath to window for console access (development only)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).loadModel = loadModelFromPath;
+      console.log('💡 loadModel() function exposed to window');
+      console.log('   Usage: loadModel("public/models/your-model.glb", "Model Name")');
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).loadModel;
+      }
+    };
+  }, [loadModelFromPath]);
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     preventDragDefaults(e);
@@ -1055,7 +1307,16 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
     >
-      <canvas ref={canvasRef} style={styles.canvas()} />
+      <canvas ref={canvasRef} style={{
+        ...styles.canvas(),
+        // Force canvas to background layer
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        zIndex: 0,
+        // Completely remove WebGPU canvas from rendering when no model loaded
+        display: (engineType === 'WebGPU' && !loadedModel) ? 'none' : 'block',
+      }} />
 
       {/* Toolbar */}
       {showUI && <div style={styles.toolbar()}>
@@ -1251,19 +1512,34 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
         </div>
       )}
 
-      {!loadedModel && !isDragging && (
-        <div style={styles.emptyState()}>
-          <div style={styles.emptyStateEmoji()}>
-            {VIEWER_CONFIG.text.emptyState.emoji}
+      {!loadedModel && !isDragging && (() => {
+        console.log('🎨 RENDERING EMPTY STATE:', { isEngineReady, loadedModel: !!loadedModel, isDragging });
+        return (
+          <div style={styles.emptyState()}>
+            {!isEngineReady ? (
+              <>
+                <div style={styles.emptyStateEmoji()}>⚙️</div>
+                <div style={styles.emptyStateTitle()}>Initializing Viewer...</div>
+                <div style={styles.emptyStateSubtitle()}>
+                  Detecting WebGPU/WebGL support
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={styles.emptyStateEmoji()}>
+                  {VIEWER_CONFIG.text.emptyState.emoji}
+                </div>
+                <div style={styles.emptyStateTitle()}>
+                  {VIEWER_CONFIG.text.emptyState.title}
+                </div>
+                <div style={styles.emptyStateSubtitle()}>
+                  {VIEWER_CONFIG.text.emptyState.subtitle}
+                </div>
+              </>
+            )}
           </div>
-          <div style={styles.emptyStateTitle()}>
-            {VIEWER_CONFIG.text.emptyState.title}
-          </div>
-          <div style={styles.emptyStateSubtitle()}>
-            {VIEWER_CONFIG.text.emptyState.subtitle}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {loadedModel && showUI && (
         <button
@@ -1362,6 +1638,8 @@ export const BabylonViewer: React.FC<BabylonViewerProps> = ({
           instrumentation={instrumentationRef.current}
           loadTime={loadTime}
           loadTimingBreakdown={loadTimingBreakdown}
+          engineType={engineType}
+          isFallback={isEngineFallback}
         />
       )}
 
