@@ -549,6 +549,24 @@ export const VIEWER_CONFIG = {
   },
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // MATERIAL CONFIGURATION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  materials: {
+    /**
+     * PBR Material settings
+     *
+     * What: Default physical-based rendering material properties
+     * Why: Provides realistic material appearance
+     */
+    pbr: {
+      metallic: 0.0,
+      roughness: 0.5,
+      albedoColor: new Color3(0.9, 0.9, 0.9),
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // OPTIMIZATION CONFIGURATION
   // ═══════════════════════════════════════════════════════════════════════════
 

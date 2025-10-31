@@ -85,6 +85,24 @@ export const VIEWER_CONFIG = {
     radiusMultiplier: 2,
   },
 
+  // Model loading settings
+  model: {
+    applyPBRMaterials: true,
+    enableShadows: true,
+    freezeMeshes: true,
+    centerAtOrigin: true,
+    fitToView: true,
+  },
+
+  // Material settings
+  materials: {
+    pbr: {
+      metallic: 0.0,
+      roughness: 0.5,
+      albedoColor: new Color3(0.9, 0.9, 0.9),
+    },
+  },
+
   // File loading settings
   fileLoading: {
     acceptedExtension: '.glb',

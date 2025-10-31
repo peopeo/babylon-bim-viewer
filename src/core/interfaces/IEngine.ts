@@ -1,5 +1,3 @@
-import { Scene } from '@babylonjs/core';
-
 /**
  * Engine abstraction - hides WebGPU vs WebGL implementation details
  *

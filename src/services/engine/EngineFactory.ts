@@ -98,11 +98,7 @@ export class EngineFactory {
       const engine = new WebGPUEngine(canvas, {
         antialias: config.antialias,
         stencil: config.stencil,
-        /**
-         * WebGPU requires alpha channel for transparent backgrounds
-         * This is necessary to show the empty state message through the canvas
-         */
-        alpha: config.alpha,
+        // Note: WebGPU does not support 'alpha' option in engine options
       });
 
       // Initialize asynchronously (WebGPU requirement)

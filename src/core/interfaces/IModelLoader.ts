@@ -1,4 +1,4 @@
-import { AbstractMesh, Scene } from '@babylonjs/core';
+import { AbstractMesh, Vector3 } from '@babylonjs/core';
 
 /**
  * Model loader abstraction - supports multiple loading strategies
@@ -112,40 +112,34 @@ export interface LoadedModel {
  */
 export interface LoadTimingBreakdown {
   /**
-   * Time to read file/fetch from source (seconds)
+   * Total time for everything (seconds)
    */
-  sourceReadTime: number;
+  total: number;
 
   /**
-   * Time to parse GLB and create meshes (seconds)
+   * Time for Babylon.js to import and create meshes (seconds)
    */
-  parseTime: number;
+  babylonLoad: number;
 
   /**
    * Time to apply materials (seconds)
    */
-  materialsTime: number;
+  materialSetup: number;
 
   /**
    * Time to setup shadows (seconds)
    */
-  shadowsTime: number;
+  shadowSetup: number;
 
   /**
-   * Time to freeze meshes (seconds)
+   * Time to calculate bounding box (seconds)
    */
-  freezeTime: number;
+  boundingBox: number;
 
   /**
-   * Time waiting for scene.whenReady() (seconds)
-   * Babylon.js internal processing time
+   * Time for optimizations (freezing meshes, etc.) (seconds)
    */
-  sceneReadyTime: number;
-
-  /**
-   * Total time from start to fully loaded (seconds)
-   */
-  totalTime: number;
+  optimization: number;
 }
 
 /**
@@ -161,6 +155,21 @@ export interface ModelStats {
    * Total number of vertices across all meshes
    */
   vertexCount: number;
+
+  /**
+   * Total number of faces/triangles
+   */
+  faceCount: number;
+
+  /**
+   * Bounding box information
+   */
+  boundingBox: {
+    min: Vector3;
+    max: Vector3;
+    size: Vector3;
+    center: Vector3;
+  };
 
   /**
    * Number of unique materials

@@ -13,11 +13,9 @@ import {
   UtilityLayerRenderer,
   SceneInstrumentation,
   HighlightLayer,
-  Color3,
 } from '@babylonjs/core';
 import { GridMaterial } from '@babylonjs/materials';
 import { VIEWER_CONFIG } from '../../components/BabylonViewer.config';
-import { BabylonRefs } from '../../components/BabylonViewer.types';
 
 /**
  * Initialize a new Babylon.js scene with all required objects

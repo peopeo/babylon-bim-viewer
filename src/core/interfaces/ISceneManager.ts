@@ -7,7 +7,7 @@ import {
   GizmoManager,
   SceneInstrumentation,
   HighlightLayer,
-  AbstractMesh,
+  Color4,
 } from '@babylonjs/core';
 import { IEngine } from './IEngine';
 
@@ -118,6 +118,29 @@ export interface SceneConfigUpdate {
    * Example: { r: 0.5, g: 0.5, b: 0.55, a: 1.0 }
    */
   backgroundColor?: { r: number; g: number; b: number; a: number };
+
+  /**
+   * Scene clear color
+   */
+  clearColor?: Color4;
+
+  /**
+   * Environment intensity for PBR materials
+   */
+  environmentIntensity?: number;
+
+  /**
+   * Camera configuration updates
+   */
+  camera?: {
+    wheelPrecision?: number;
+    panningSensibility?: number;
+    inertia?: number;
+    minZ?: number;
+    maxZ?: number;
+    lowerRadiusLimit?: number;
+    upperRadiusLimit?: number;
+  };
 
   /**
    * Enable/disable scene optimizer
